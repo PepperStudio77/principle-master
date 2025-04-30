@@ -1,4 +1,12 @@
 # Byte-compiled / optimized / DLL files
+principle-master/config
+principle-master/logs
+principle-master/output
+principle-master/state
+principle-master/notes
+principle-master/index
+.idea
+
 __pycache__/
 *.py[cod]
 *$py.class

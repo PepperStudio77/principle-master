@@ -1,0 +1,9 @@
+openai
+tiktoken
+pymupdf
+fitz
+click
+llama_index
+llama-index-llms-deepseek
+dspy
+rich
