@@ -1,12 +1,11 @@
 from typing import List
 
 from llama_index.core.agent.workflow import FunctionAgent
-from llama_index.core.workflow import Context, JsonSerializer
-from llama_index.llms.deepseek import DeepSeek
+from llama_index.core.workflow import Context
 
-from utils.journal_keeper import Response, write_response_to_mark_down
 from utils.clarification import save_interview_notes, load_interview_notes
-from utils.llm import get_config, get_llm
+from utils.journal_keeper import Response, write_response_to_mark_down
+from utils.llm import get_openai_llm
 
 
 async def read_interview_notes():
@@ -29,7 +28,7 @@ def get_evaluator_agent():
     agent = FunctionAgent(
         name="Evaluator",
         description="Evaluate the planning status and decides which Agent should rout to.",
-        llm=get_llm(),
+        llm=get_openai_llm(),
         tools=[read_interview_notes],
         system_prompt="You are the master mind and orchestrator of the plan generation to help users adopt good habits which they desire. \n"
                       "You will always attempt to read interview notes at the beginning.\n"
@@ -65,7 +64,7 @@ def get_interviewer_agent():
     agent = FunctionAgent(
         name="Interviewer",
         description="Useful for get clarification from users",
-        llm=get_llm(),
+        llm=get_openai_llm(),
         tools=[ask_clarification],
         system_prompt="You are an interviewer which seek for further clarification for users' input to facilitate"
                       "user to make up a plan to adopt new habit they want.\n"
@@ -90,7 +89,7 @@ def get_planner_agent():
     agent = FunctionAgent(
         name="Planner",
         description="Useful for produce a plan to help user establish new good habits.",
-        llm=get_llm(),
+        llm=get_openai_llm(),
         tools=[persist_the_plan],
         system_prompt="You are a intelligent, well thought planer which can produce a effective plan to encourage user to establish a new good habit\n"
                       "The criteria of a good plan including:\n"

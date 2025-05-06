@@ -2,19 +2,18 @@ import asyncio
 import os.path
 from typing import List
 
-from llama_index.core import Document, StorageContext, load_index_from_storage, VectorStoreIndex, \
-    Settings, get_response_synthesizer, Response
-from llama_index.core.agent.workflow import ReActAgent, AgentOutput, ToolCallResult, ToolCall
-from llama_index.core.base.base_query_engine import BaseQueryEngine
-from llama_index.core.evaluation import RelevancyEvaluator, BaseEvaluator
+from llama_index.core import StorageContext, load_index_from_storage, VectorStoreIndex, \
+    Settings, get_response_synthesizer
+from llama_index.core.agent.workflow import AgentOutput, ToolCallResult, ToolCall, FunctionAgent
+from llama_index.core.base.llms.types import ChatMessage
 from llama_index.core.indices.vector_store import VectorIndexRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response_synthesizers import ResponseMode
 from llama_index.core.tools import FunctionTool
 
-from core.state import WorkflowState
+from core.index import load_persisted_index
+from core.state import get_workflow_state
 from utils.llm import get_embedding, get_openai_llm
-from utils.pdf_file import load_principle_book_summary_to_string, load_principle_book_full_to_string
 
 
 def _get_local_index_store_dir():
@@ -27,22 +26,6 @@ def _load_persisted_index(local_index_store: str):
     storage_context = StorageContext.from_defaults(persist_dir=local_index_store)
     index = load_index_from_storage(storage_context)
     return index
-
-
-def _create_index_for_content(load_full_book: bool, use_cache: bool):
-    local_index_store = _get_local_index_store_dir()
-    if use_cache and os.path.exists(local_index_store):
-        return _load_persisted_index(local_index_store)
-    if load_full_book:
-        content = load_principle_book_full_to_string()
-    else:
-        content = load_principle_book_summary_to_string()
-    documents = [Document(text=content)]
-    vector_index = VectorStoreIndex.from_documents(documents)
-    if use_cache:
-        os.makedirs(local_index_store, exist_ok=True)
-        vector_index.storage_context.persist(persist_dir=local_index_store)
-    return vector_index
 
 
 TOP_K = 2
@@ -83,7 +66,7 @@ The content style is practical, structured, focused on systems thinking — not 
 Task:
 - Task 1: Rewrite a user’s question into a statement that would match how Ray Dalio frames ideas in Principles. Emphasize problem-solving, systems, truth-seeking, decision-making frameworks.Avoid emotional tone or overly personal phrasing.Keep the rewritten version faithful to the user's original meaning but recast it in Principles language. Use formal, logical, neutral tone.
 - Task 2: Look up principle book with given re-wrote statements. You should provide at least {REWRITE_FACTOR} rewrote versions.
-- Task 3: Find the most relevant content as your fina answers. You do not have to re-write or summarise the content. 
+- Task 3: Find the most relevant from the book content as your fina answers. 
 
 Example rewrites:
 - User Question: "How can I recover after making a mistake?"
@@ -96,153 +79,136 @@ Example rewrites:
   - "A team's effectiveness is measured by the quality of meaningful work and meaningful relationships achieved through radical truth and transparency."
   - "Evaluating team health requires assessing alignment to radical truth, open communication, and meritocratic collaboration."
   - "Organizational success is determined by how openly and effectively team members pursue shared goals with transparency and trust."
-	
-Instruction:
-If the user's question is very short or vague, you can seek clarification with users by using tools.  
-Always phrase the output as a statement, not a question.
-You should look up principle book with your re-wrote when you see fit. 
+
 """
 
 
-class PrincipleRagAgent(object):
+def get_principle_rag_agent():
+    index = load_persisted_index()
+    query_engine = _create_query_engine_from_index(index)
+    query_engine = query_engine
 
-    def __init__(self, query_engine: BaseQueryEngine, verbose: bool = False):
-        self.evaluator = RelevancyEvaluator()
-        self.query_engine = query_engine
-        self.verbose = verbose
+    def look_up_principle_book(original_question: str, rewrote_statement: List[str]) -> List[str]:
+        result = []
+        for q in rewrote_statement:
+            response = query_engine.query(q)
+            content = [n.get_content() for n in response.source_nodes]
+            result.extend(content)
+        return result
 
-        def look_up_principle_book(original_question, rewrote_queries: List[str]) -> List[str]:
-            result = []
-            for q in rewrote_queries:
-                response = self.query_engine.query(q)
-                content = [n.get_content() for n in response.source_nodes]
-                result.extend(content)
-            return result
+    tools = [
+        FunctionTool.from_defaults(
+            fn=look_up_principle_book,
+            name="look_up_principle_book",
+            description="Look up principle book with re-wrote queries. Getting the suggestions from the Principle book by Ray Dalio"),
+    ]
 
-        def seek_clarification(question: str) -> str:
-            response = input(question + ":")
-            return response
-
-        tools = [
-            FunctionTool.from_defaults(
-                fn=look_up_principle_book,
-                name="look_up_principle_book",
-                description="Look up principle book with re-wrote queries. Getting the suggestions from the Principle book by Ray Dalio's"),
-            FunctionTool.from_defaults(
-                fn=seek_clarification,
-                name="seek_clarification",
-                description="Clarify with users when the user's question is less clear."
-            )
-        ]
-
-        self.agent = ReActAgent(
-            name="principle_reference_loader",
-            description="You are a helpful agent will based on user's question and look up the most relevant content in principle book.\n",
-            system_prompt=QUESTION_REWRITE_PROMPT,
-            tools=tools)
-
-    @classmethod
-    def from_default_query_engine(cls, load_full_book: bool = False, use_cache: bool = True, verbose: bool = False):
-        index = _create_index_for_content(load_full_book=load_full_book, use_cache=use_cache)
-        query_engine = _create_query_engine_from_index(index)
-        return cls(query_engine, verbose=verbose)
-
-    async def retrieve_book_content(self, question: str):
-        if not self.verbose:
-            response = await self.agent.run(user_msg=question)
-            return response
-
-        handler = self.agent.run(user_msg=question)
-        response = None
-        async for event in handler.stream_events():
-            if isinstance(event, AgentOutput):
-                if event.response.content:
-                    print("📤 Output:", event.response.content)
-                    response = event.response.content
-                if event.tool_calls:
-                    print(
-                        "🛠️  Planning to use tools:",
-                        [call.tool_name for call in event.tool_calls],
-                    )
-            elif isinstance(event, ToolCallResult):
-                print(f"🔧 Tool Result ({event.tool_name}):")
-                print(f"  Arguments: {event.tool_kwargs}")
-                print(f"  Output: {event.tool_output}")
-            elif isinstance(event, ToolCall):
-                print(f"🔨 Calling Tool: {event.tool_name}")
-                print(f"  With arguments: {event.tool_kwargs}")
-        # return final response
-        return response
+    agent = FunctionAgent(
+        name="principle_reference_loader",
+        description="You are a helpful agent will based on user's question and look up the most relevant content in principle book.\n",
+        system_prompt=QUESTION_REWRITE_PROMPT,
+        tools=tools,
+    )
+    return agent
 
 
 ADVISER_PROMPT = """
-You are an AI assistant that provides thoughtful, practical suggestions by combining:
-Use's question:
-{user_question}
+You are an AI assistant that provides thoughtful, practical, and *deeply personalized* suggestions by combining:
+- The user's personal profile and principles
+- Insights retrieved from *Principles* by Ray Dalio
 
-Book Content retrieved from Principles by Ray Dalio:
+---  
+User Profile:  
+
+User's Profile:
 ```
-{book_content}
+{user_profile}
 ```
 
-The user's personal principles, beliefs, or context.
 User's principle:
 ```
 {user_principles}
 ```
 
-Principles emphasizes radical truth, radical transparency, decision-making systems, learning from mistakes, believability-weighted evaluation, and systematic problem solving.
-Ground your suggestions in the ideas retrieved from Principle, and prioritise to use user's own principle when they are relevant.  
-Respect differences if the user's principles differ slightly from Dalio's — adapt, don't override.
+Book Content: 
+```
+{book_content}
+```
 
-Style of Suggestions:
-Logical, structured, pragmatic
-Neutral and rational tone (avoid emotional bias)
-Encourage reflection, learning, and iterative improvement
-Where appropriate, recommend structured steps or frameworks (e.g., 5-step process: goals → problems → diagnosis → design → execution)
+## ✍️ Style Guidelines:
+
+- Provide the suggestions based on the content of book when relevant. 
+- Ground your suggestion in something **specific about the user** (e.g. a strength, weakness, past experiences).
+- Provide Top 3 most relevant suggestions. 
+
+---
 
 """
 
 
-class PrincipleAdviser(object):
-
-    def __init__(self, question: str, book_content: str, user_principles: List[str], verbose: bool = False):
-        self.question = question
-        self.book_content = book_content
-        self.user_principle = user_principles
-        self.verbose = verbose
-        self.agent = ReActAgent(
-            name="principle_advisor",
-            description="You are a helpful advisor which will advise user's question based on the some guidance from Principle book by Ray Dalio and user's own principles.\n",
-            system_prompt=ADVISER_PROMPT.format(
-                user_question=question,
-                book_content=book_content,
-                user_principles="\n".join(user_principles)
-            ))
-
-    async def advice(self):
-        if not self.verbose:
-            response = await self.agent.run(user_msg=self.question)
-            return response
-        handler = self.agent.run(user_msg=self.question)
-        response = None
-        async for event in handler.stream_events():
-            if isinstance(event, AgentOutput):
-                if event.response.content:
-                    print("📤 Output:", event.response.content)
-                    response = event.response.content
-        return response
+def get_adviser_agent(user_profile: dict, user_principles: List[str], book_content: str):
+    agent = FunctionAgent(
+        name="principle_advisor",
+        description="You are a helpful advisor which will advise user's question based on the some guidance from Principle book by Ray Dalio and user's own principles.\n",
+        system_prompt=ADVISER_PROMPT.format(
+            user_principles="\n".join(user_principles),
+            user_profile="\n".join([k + ": " + v for (k, v) in user_profile.items()]),
+            book_content=book_content,
+        ))
+    return agent
 
 
-async def run(question: str, principles: List[str], verbose:bool=False):
-    rag_agent = PrincipleRagAgent.from_default_query_engine(load_full_book=True, verbose=verbose)
-    book_content = await rag_agent.retrieve_book_content(question)
-    advise_agent = PrincipleAdviser(question=question, book_content=book_content, user_principles=principles, verbose=verbose)
-    return await advise_agent.advice()
+async def run_agent(agent: FunctionAgent, question, verbose: bool = False):
+    chat_history = [
+        ChatMessage(
+            role="user", content=question,
+        ),
+    ]
+    handler = agent.run(chat_history=chat_history)
+    if not verbose:
+        return await handler
+    result = None
+    current_agent = None
+    async for event in handler.stream_events():
+        if (
+                hasattr(event, "current_agent_name")
+                and event.current_agent_name != current_agent
+        ):
+            current_agent = event.current_agent_name
+            print(f"\n{'=' * 50}")
+            print(f"🤖 Agent: {current_agent}")
+            print(f"{'=' * 50}\n")
+        elif isinstance(event, AgentOutput):
+            if event.response.content:
+                print("📤 Output:", event.response.content)
+                result = event.response.content
+            if event.tool_calls:
+                print(
+                    "🛠️  Planning to use tools:",
+                    [call.tool_name for call in event.tool_calls],
+                )
+        elif isinstance(event, ToolCallResult):
+            print(f"🔧 Tool Result ({event.tool_name}):")
+            print(f"  Arguments: {event.tool_kwargs}")
+            print(f"  Output: {event.tool_output}")
+        elif isinstance(event, ToolCall):
+            print(f"🔨 Calling Tool: {event.tool_name}")
+            print(f"  With arguments: {event.tool_kwargs}")
+    return result
+
+
+async def get_advise(session_id: str, question: str, verbose: bool = False):
+    state = get_workflow_state(session_id)
+    principles = state.load_principle_from_cases()
+    profile = state.load_profile()
+    rag_agent = get_principle_rag_agent()
+    book_content = await run_agent(rag_agent, question=question, verbose=verbose)
+    advisor = get_adviser_agent(profile, principles, book_content)
+    advise = await run_agent(advisor, question=question, verbose=verbose)
+    return advise
 
 
 if __name__ == '__main__':
     Settings.embed_model = get_embedding()
     Settings.llm = get_openai_llm()
-    state = WorkflowState()
-    asyncio.run(run("How to handle stress?", state.load_principle_from_cases(), True))
+    asyncio.run(get_advise("xxxx", "How to handle stress?", True, True))

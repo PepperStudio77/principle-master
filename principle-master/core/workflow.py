@@ -2,49 +2,34 @@ import uuid
 from typing import Optional
 
 from llama_index.core import Settings
-from llama_index.core.agent.workflow import AgentOutput, ToolCallResult, ToolCall
 from llama_index.core.base.llms.types import ChatMessage
 from llama_index.core.memory import BaseMemory, ChatMemoryBuffer
-from llama_index.core.workflow import Context, Workflow, step, StartEvent, StopEvent
+from llama_index.core.workflow import Context, Workflow, step, StartEvent, StopEvent, Event
 from rich import print
 
+from core.advise import get_advise
 from core.case_reflection import CaseReflectionAgent
 from core.intention import IntentionDetectionAgent
 from core.profile import ProfileUpdateAgent
-from core.state import CASE_REFLECTION, ROUTING, ENDING, \
-    CaseReflectionEvent, RoutingEvent, get_workflow_state, AVAILABLE_FUNCTIONS, RecordProfileEvent, \
-    RECORD_PROFILE, Advice, ADVISE
-from utils.llm import get_llm, get_embedding
+from core.state import CASE_REFLECTION, ROUTING, ENDING, get_workflow_state, AVAILABLE_FUNCTIONS, \
+    RECORD_PROFILE, ADVISE
+from utils.llm import get_openai_llm, get_embedding, get_config
 
 
-async def print_details(workflow_handler) -> str:
-    current_agent = None
-    async for event in workflow_handler.stream_events():
-        if (
-                hasattr(event, "current_agent_name")
-                and event.current_agent_name != current_agent
-        ):
-            current_agent = event.current_agent_name
-            print(f"\n{'=' * 50}")
-            print(f"🤖 Agent: {current_agent}")
-            print(f"{'=' * 50}\n")
-        elif isinstance(event, AgentOutput):
-            if event.response.content:
-                print("📤 Output:", event.response.content)
-                return event.response.content
-            if event.tool_calls:
-                print(
-                    "🛠️  Planning to use tools:",
-                    [call.tool_name for call in event.tool_calls],
-                )
-        elif isinstance(event, ToolCallResult):
-            print(f"🔧 Tool Result ({event.tool_name}):")
-            print(f"  Arguments: {event.tool_kwargs}")
-            print(f"  Output: {event.tool_output}")
-        elif isinstance(event, ToolCall):
-            print(f"🔨 Calling Tool: {event.tool_name}")
-            print(f"  With arguments: {event.tool_kwargs}")
-    return "Event Streaming Finished without Agent output"
+class CaseReflectionEvent(Event):
+    input: str
+
+
+class RecordProfileEvent(Event):
+    input: str
+
+
+class RoutingEvent(Event):
+    input: str
+
+
+class Advice(Event):
+    input: str
 
 
 class PrincipleMasterFlow(Workflow):
@@ -60,6 +45,7 @@ class PrincipleMasterFlow(Workflow):
         self.session_id = str(uuid.uuid4())
         self.router_state = get_workflow_state(self.session_id)
         self._greeted = False
+        self.conf = get_config()
         super().__init__(timeout=None, verbose=verbose)
 
     EVENT_MAP = {
@@ -102,26 +88,20 @@ class PrincipleMasterFlow(Workflow):
 
     @step
     async def advice(self, ctx: Context, ev: Advice) -> RoutingEvent:
-        pass
+        uer_question = input("How can I help you today?")
+        advise = await get_advise(session_id=self.session_id, question=uer_question, verbose=self.verbose)
+        print(advise)
+        return RoutingEvent(input=advise)
 
 
 TOKEN_LIMIT = 40000
 
 
-async def run():
-    llm = get_llm()
+async def run_customise_workflow(verbose:bool=False):
+    llm = get_openai_llm()
     Settings.llm = llm
     embed_model = get_embedding()
     Settings.embed_model = embed_model
     memory = ChatMemoryBuffer.from_defaults(token_limit=TOKEN_LIMIT)
-    workflow = PrincipleMasterFlow(memory=memory, verbose=True)
-    result = await workflow.run()
-    print(result)
-
-
-if __name__ == '__main__':
-    # asyncio.run(run())
-    embed_model = get_embedding()
-    # Use the embedding model
-    embeddings = embed_model.get_text_embedding("This is a test sentence.")
-    print(embeddings)
+    workflow = PrincipleMasterFlow(memory=memory, verbose=verbose)
+    _ = await workflow.run()

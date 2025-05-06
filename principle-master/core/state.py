@@ -14,23 +14,6 @@ ROUTING: Function = "Routing"
 ENDING: Function = "Ending"
 _INIT_STATE = ROUTING
 
-
-class CaseReflectionEvent(Event):
-    input: str
-
-
-class RecordProfileEvent(Event):
-    input: str
-
-
-class RoutingEvent(Event):
-    input: str
-
-
-class Advice(Event):
-    input: str
-
-
 AVAILABLE_FUNCTIONS = {
     CASE_REFLECTION,
     RECORD_PROFILE,
@@ -158,7 +141,6 @@ class WorkflowState(object):
         cases = self.load_cases()
         principles = []
         for c in cases:
-            principles.append(c["principle_applied"])
             principles.append(c["new_principle"])
         return principles
 

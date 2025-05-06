@@ -13,17 +13,11 @@ def get_config():
         return json.load(f)
 
 
-def get_llm():
-    config = get_config()
-    return DeepSeek(model="deepseek-chat", api_key=config["llm_api_key"])
-
 def get_openai_llm():
     config = get_config()
-    return OpenAI(model="o1", api_key=config["embedding_api_key"])
-
-
+    return OpenAI(model="o1", api_key=config["llm_api_key"])
 
 
 def get_embedding():
     config = get_config()
-    return OpenAIEmbedding(api_key=config["embedding_api_key"])
+    return OpenAIEmbedding(api_key=config["llm_api_key"])
