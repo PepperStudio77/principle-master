@@ -166,7 +166,8 @@ async def run_agent(agent: FunctionAgent, question, verbose: bool = False):
     ]
     handler = agent.run(chat_history=chat_history)
     if not verbose:
-        return await handler
+        output = await handler
+        return output.response.content
     result = None
     current_agent = None
     async for event in handler.stream_events():

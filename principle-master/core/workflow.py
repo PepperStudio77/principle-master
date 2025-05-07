@@ -13,7 +13,7 @@ from core.intention import IntentionDetectionAgent
 from core.profile import ProfileUpdateAgent
 from core.state import CASE_REFLECTION, ROUTING, ENDING, get_workflow_state, AVAILABLE_FUNCTIONS, \
     RECORD_PROFILE, ADVISE
-from utils.llm import get_openai_llm, get_embedding, get_config
+from utils.llm import get_openai_llm, get_embedding, get_config, get_gemini_llm
 
 
 class CaseReflectionEvent(Event):
@@ -98,7 +98,7 @@ TOKEN_LIMIT = 40000
 
 
 async def run_customise_workflow(verbose:bool=False):
-    llm = get_openai_llm()
+    llm = get_gemini_llm()
     Settings.llm = llm
     embed_model = get_embedding()
     Settings.embed_model = embed_model

@@ -1,12 +1,11 @@
 import hashlib
 from typing import Optional
 
-from llama_index.core.llms.function_calling import FunctionCallingLLM
 from llama_index.core.memory import BaseMemory
 from llama_index.core.tools import FunctionTool
 
 from core.agent_runners import MyAgentRunner
-from core.state import get_workflow_state , WorkflowState
+from core.state import get_workflow_state, WorkflowState
 
 
 class CaseReflectionAgent(MyAgentRunner):
@@ -69,8 +68,9 @@ class CaseReflectionAgent(MyAgentRunner):
     def _my_chat(self, msg: str) -> str:
         user_input = msg
         while True:
-            response = super().chat(user_input)
-            if self.END_OUTPUT in response.response:
-                return self.END_OUTPUT
-            self.print(response.response)
+            if user_input != "":
+                response = super().chat(user_input)
+                if self.END_OUTPUT in response.response:
+                    return self.END_OUTPUT
+                self.print(response.response)
             user_input = input(">>")

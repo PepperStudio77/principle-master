@@ -21,7 +21,10 @@ class IntentionDetectionAgent(MyAgentRunner):
     def _my_chat(self, msg: str) -> str:
         while True:
             user_input = input(">>")
+            if user_input == "":
+                continue
             response = super().chat(user_input)
-            if response.response in self.ALL_STAGES:
-                return response.response
-            self.print(response.response)
+            stripped = response.response.strip()
+            if stripped in self.ALL_STAGES:
+                return stripped
+            self.print(stripped)
