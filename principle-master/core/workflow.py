@@ -7,7 +7,7 @@ from llama_index.core.memory import BaseMemory, ChatMemoryBuffer
 from llama_index.core.workflow import Context, Workflow, step, StartEvent, StopEvent, Event
 from rich import print
 
-from core.advice_agent_flow import run_static_workflow
+from core.advice_agent_flow import get_advice_dynamic_workflow, get_static_workflow
 from core.case_reflection import CaseReflectionAgent
 from core.intention import IntentionDetectionAgent
 from core.profile import ProfileUpdateAgent
@@ -89,20 +89,13 @@ class PrincipleMasterFlow(Workflow):
         return RoutingEvent(input=response)
 
     @step
-    async def advice(self, ctx: Context, ev: Advice) -> RoutingEvent:
+    async def advice(self, ctx: Context, ev: Advice) -> StopEvent:
         uer_question = input("How can I help you today?")
-        if self.is_dynamic_advice_flow:
-            # dynamic advice flow
-            print("Dynamic advice flow")
-            from core.advice_agent_flow import run_dynamic_workflow
-            advise = await run_dynamic_workflow(session_id=self.session_id, question=uer_question,
-                                                verbose=self.verbose)
-        else:
-            print("Static advice flow")
-            advise = await run_static_workflow(session_id=self.session_id, question=uer_question,
-                                               verbose=self.verbose)
+        workflow = get_advice_dynamic_workflow(session_id=self.session_id) if self.is_dynamic_advice_flow else \
+            get_static_workflow(session_id=self.session_id, verbose=self.verbose)
+        advise = await workflow.run(user_msg=uer_question)
         print(advise)
-        return RoutingEvent(input=advise)
+        return StopEvent(result="Done")
 
 
 TOKEN_LIMIT = 40000

@@ -1,13 +1,15 @@
-from llama_index.core import Settings
+from typing import List
+
 from llama_index.core.agent.workflow import AgentWorkflow, AgentOutput, ToolCallResult, ToolCall, FunctionAgent
 from llama_index.core.base.llms.types import ChatMessage
+from llama_index.core.workflow import Workflow, Event, step, Context, StartEvent, StopEvent
+from llama_index.core.workflow.handler import WorkflowHandler
 
 from core.advisor_agents import get_principle_rag_agent, get_interviewer_agent, get_adviser_agent
 from core.state import get_workflow_state
-from utils.llm import get_openai_llm, get_embedding
 
 
-def get_advice_dynamic_workflow(session_id: str):
+def get_advice_dynamic_workflow(session_id: str, verbose: bool = False):
     state = get_workflow_state(session_id)
     interviewer = get_interviewer_agent(True, ["reference_retriever"])
     retriever = get_principle_rag_agent(True, ["principle_advisor"])
@@ -18,21 +20,75 @@ def get_advice_dynamic_workflow(session_id: str):
     workflow = AgentWorkflow(
         agents=[interviewer, advisor, retriever],
         root_agent="interviewer",
+        verbose=verbose,
     )
     return workflow
 
 
-async def run_dynamic_workflow(session_id: str, question: str, verbose: bool = False):
-    workflow = get_advice_dynamic_workflow(session_id)
-    user_msg = f"""
-    Please give advise me given following question: {question}. 
-    You can seek clarification to me further if want to. 
-    I would like you to retrieve relevant content from Principle book by Ray Dalio, combine with my profile and existing principle, 
-    generate catered suggestions for me. """
-    handler = workflow.run(user_msg=user_msg)
-    if not verbose:
-        output = await handler
-        return output.response.content
+def get_static_workflow(session_id: str, verbose: bool = False):
+    workflow = AdviceWorkFlow(session_id=session_id, verbose=verbose)
+    return workflow
+
+async def _run_agent(agent: FunctionAgent, question, verbose: bool = False):
+    chat_history = [
+        ChatMessage(
+            role="user", content=question,
+        ),
+    ]
+    handler = agent.run(chat_history=chat_history)
+    if verbose:
+        result = await _verbose_print(handler)
+        return result
+    output = await handler
+    return output.response.content
+
+
+class ReferenceRetrivalEvent(Event):
+    question: str
+
+
+class Advice(Event):
+    principles: List[str]
+    profile: dict
+    question: str
+    book_content: str
+
+
+class AdviceWorkFlow(Workflow):
+
+    def __init__(self, verbose: bool = False, session_id: str = None):
+        state = get_workflow_state(session_id)
+        self.principles = state.load_principle_from_cases()
+        self.profile = state.load_profile()
+        self.verbose = verbose
+        super().__init__(timeout=None, verbose=verbose)
+
+    @step
+    async def interview(self, ctx: Context,
+                        ev: StartEvent) -> ReferenceRetrivalEvent:
+        # Step 1: Interviewer agent asks questions to the user
+        interviewer = get_interviewer_agent()
+        question = await _run_agent(interviewer, question=ev.user_msg, verbose=self.verbose)
+
+        return ReferenceRetrivalEvent(question=question)
+
+    @step
+    async def retrieve(self, ctx: Context, ev: ReferenceRetrivalEvent) -> Advice:
+        # Step 2: RAG agent retrieves relevant content from the book
+        rag_agent = get_principle_rag_agent()
+        book_content = await _run_agent(rag_agent, question=ev.question, verbose=self.verbose)
+        return Advice(principles=self.principles, profile=self.profile,
+                      question=ev.question, book_content=book_content)
+
+    @step
+    async def advice(self, ctx: Context, ev: Advice) -> StopEvent:
+        # Step 3: Adviser agent provides advice based on the user's profile, principles, and book content
+        advisor = get_adviser_agent(ev.profile, ev.principles, ev.book_content)
+        advise = await _run_agent(advisor, question=ev.question, verbose=self.verbose)
+        return StopEvent(result=advise)
+
+
+async def _verbose_print(handler: WorkflowHandler) -> str:
     # provide verbose output
     result = None
     current_agent = None
@@ -61,71 +117,7 @@ async def run_dynamic_workflow(session_id: str, question: str, verbose: bool = F
         elif isinstance(event, ToolCall):
             print(f"🔨 Calling Tool: {event.tool_name}")
             print(f"  With arguments: {event.tool_kwargs}")
+        elif isinstance(event, StopEvent):
+            print(f"🔧 Stop Event: {event}")
+            result = str(event.result)
     return result
-
-async def run_agent(agent: FunctionAgent, question, verbose: bool = False):
-    chat_history = [
-        ChatMessage(
-            role="user", content=question,
-        ),
-    ]
-    handler = agent.run(chat_history=chat_history)
-    if not verbose:
-        output = await handler
-        return output.response.content
-    result = None
-    current_agent = None
-    async for event in handler.stream_events():
-        if (
-                hasattr(event, "current_agent_name")
-                and event.current_agent_name != current_agent
-        ):
-            current_agent = event.current_agent_name
-            print(f"\n{'=' * 50}")
-            print(f"🤖 Agent: {current_agent}")
-            print(f"{'=' * 50}\n")
-        elif isinstance(event, AgentOutput):
-            if event.response.content:
-                print("📤 Output:", event.response.content)
-                result = event.response.content
-            if event.tool_calls:
-                print(
-                    "🛠️  Planning to use tools:",
-                    [call.tool_name for call in event.tool_calls],
-                )
-        elif isinstance(event, ToolCallResult):
-            print(f"🔧 Tool Result ({event.tool_name}):")
-            print(f"  Arguments: {event.tool_kwargs}")
-            print(f"  Output: {event.tool_output}")
-        elif isinstance(event, ToolCall):
-            print(f"🔨 Calling Tool: {event.tool_name}")
-            print(f"  With arguments: {event.tool_kwargs}")
-    return result
-
-
-async def run_static_workflow(session_id: str, question: str, verbose: bool = False):
-    state = get_workflow_state(session_id)
-    principles = state.load_principle_from_cases()
-    profile = state.load_profile()
-    interviewer = get_interviewer_agent()
-    interview_result = await run_agent(interviewer, question=question, verbose=verbose)
-    rag_agent = get_principle_rag_agent()
-    book_content = await run_agent(rag_agent, question=interview_result, verbose=verbose)
-    advisor = get_adviser_agent(profile, principles, book_content)
-    advise = await run_agent(advisor, question=interview_result, verbose=verbose)
-    return advise
-
-
-async def run():
-    session_id = "test_session"
-    question = "How can I improve my time management skills?"
-    result = await workflow_run(session_id, question, verbose=True)
-    print(result)
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    Settings.llm = get_openai_llm()
-    Settings.embed_model = get_embedding()
-    asyncio.run(run())
