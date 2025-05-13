@@ -1,31 +1,54 @@
-import asyncio
-import os.path
 from typing import List
 
-from llama_index.core import StorageContext, load_index_from_storage, VectorStoreIndex, \
-    Settings, get_response_synthesizer
-from llama_index.core.agent.workflow import AgentOutput, ToolCallResult, ToolCall, FunctionAgent
-from llama_index.core.base.llms.types import ChatMessage
+from llama_index.core import VectorStoreIndex, get_response_synthesizer
+from llama_index.core.agent.workflow import FunctionAgent
 from llama_index.core.indices.vector_store import VectorIndexRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.response_synthesizers import ResponseMode
 from llama_index.core.tools import FunctionTool
 
 from core.index import load_persisted_index
-from core.state import get_workflow_state
-from utils.llm import get_embedding, get_openai_llm
+
+DYNAMIC_AGENT_ADJUSTMENT_PROMPT = "You should handover to {next_agent_name} when you are done. "
+
+QUESTION_COUNT = 1
+
+interviewer_prompt = f"""
+You are helpful agent which build for raise clarification to users by calling clarification tools. 
+Your goal is getting the detail information of user's questions to give throughout guidance. 
+You should ask no more than {QUESTION_COUNT} to users.
+You should not attempt to answer the question but return summarised content as your output. 
+"""
 
 
-def _get_local_index_store_dir():
-    index_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "./index")
-    return index_dir
+def get_interviewer_agent(is_dynamic_agent: bool = False, can_handoff_to: List[str] = None):
+    def clarification(questions: List[str]) -> str:
+        result = ""
+        for q in questions:
+            result += q + ":"
+            print(q)
+            response = input(">>")
+            result += response + "\n"
+        return result
 
-
-def _load_persisted_index(local_index_store: str):
-    storage_context = StorageContext.from_defaults(persist_dir=local_index_store)
-    index = load_index_from_storage(storage_context)
-    return index
+    tools = [
+        FunctionTool.from_defaults(
+            fn=clarification,
+            name="clarification",
+            description="Useful tool take questions for clarification as input, return user's response as output"
+        )
+    ]
+    prompt = interviewer_prompt
+    agent = FunctionAgent(
+        name="interviewer",
+        description="Useful agent to clarify user's questions",
+        system_prompt=prompt,
+        tools=tools
+    )
+    if is_dynamic_agent:
+        agent.can_handoff_to = can_handoff_to
+        agent.system_prompt += DYNAMIC_AGENT_ADJUSTMENT_PROMPT.format(next_agent_name=can_handoff_to[0])
+    return agent
 
 
 TOP_K = 2
@@ -64,9 +87,10 @@ The key ideas are:
 The content style is practical, structured, focused on systems thinking — not emotional, not vague.
 
 Task:
-- Task 1: Rewrite a user’s question into a statement that would match how Ray Dalio frames ideas in Principles. Emphasize problem-solving, systems, truth-seeking, decision-making frameworks.Avoid emotional tone or overly personal phrasing.Keep the rewritten version faithful to the user's original meaning but recast it in Principles language. Use formal, logical, neutral tone.
-- Task 2: Look up principle book with given re-wrote statements. You should provide at least {REWRITE_FACTOR} rewrote versions.
-- Task 3: Find the most relevant from the book content as your fina answers. 
+- Task 1: Clarify the user's question if needed. Ask follow-up questions to ensure you understand the user's intent.
+- Task 2: Rewrite a user’s question into a statement that would match how Ray Dalio frames ideas in Principles. Use formal, logical, neutral tone.
+- Task 3: Look up principle book with given re-wrote statements. You should provide at least {REWRITE_FACTOR} rewrote versions.
+- Task 4: Find the most relevant from the book content as your fina answers. 
 
 Example rewrites:
 - User Question: "How can I recover after making a mistake?"
@@ -83,10 +107,9 @@ Example rewrites:
 """
 
 
-def get_principle_rag_agent():
+def get_principle_rag_agent(is_dynamic_agent: bool = False, can_handoff_to: List[str] = None):
     index = load_persisted_index()
     query_engine = _create_query_engine_from_index(index)
-    query_engine = query_engine
 
     def look_up_principle_book(original_question: str, rewrote_statement: List[str]) -> List[str]:
         result = []
@@ -96,21 +119,47 @@ def get_principle_rag_agent():
             result.extend(content)
         return result
 
+    def clarify_question(original_question: str, your_questions_to_user: List[str]) -> str:
+        """
+        Clarify the user's question if needed. Ask follow-up questions to ensure you understand the user's intent.
+        """
+        response = ""
+        for q in your_questions_to_user:
+            print(f"Question: {q}")
+            r = input("Response:")
+            response += f"Question: {q}\nResponse: {r}\n"
+        return response
+
     tools = [
         FunctionTool.from_defaults(
             fn=look_up_principle_book,
             name="look_up_principle_book",
             description="Look up principle book with re-wrote queries. Getting the suggestions from the Principle book by Ray Dalio"),
+        FunctionTool.from_defaults(
+            fn=clarify_question,
+            name="clarify_question",
+            description="Clarify the user's question if needed. Ask follow-up questions to ensure you understand the user's intent.",
+        )
     ]
 
     agent = FunctionAgent(
-        name="principle_reference_loader",
+        name="reference_retriever",
         description="You are a helpful agent will based on user's question and look up the most relevant content in principle book.\n",
         system_prompt=QUESTION_REWRITE_PROMPT,
         tools=tools,
     )
+
+    if is_dynamic_agent:
+        agent.can_handoff_to = can_handoff_to
     return agent
 
+
+BOOK_CONTENT_PROMPT = """
+Book Content: 
+```
+{book_content}
+```
+"""
 
 ADVISER_PROMPT = """
 You are an AI assistant that provides thoughtful, practical, and *deeply personalized* suggestions by combining:
@@ -129,24 +178,23 @@ User's principle:
 ```
 {user_principles}
 ```
-
-Book Content: 
-```
 {book_content}
-```
 
 ## ✍️ Style Guidelines:
 
 - Provide the suggestions based on the content of book when relevant. 
 - Ground your suggestion in something **specific about the user** (e.g. a strength, weakness, past experiences).
 - Provide Top 3 most relevant suggestions. 
-
 ---
-
 """
 
 
-def get_adviser_agent(user_profile: dict, user_principles: List[str], book_content: str):
+def get_adviser_agent(user_profile: dict, user_principles: List[str], book_content: str = None,
+                      is_dynamic_agent: bool = False, can_handoff_to: List[str] = None):
+    if not is_dynamic_agent:
+        book_content = BOOK_CONTENT_PROMPT.format(book_content=book_content)
+    else:
+        book_content = ""
     agent = FunctionAgent(
         name="principle_advisor",
         description="You are a helpful advisor which will advise user's question based on the some guidance from Principle book by Ray Dalio and user's own principles.\n",
@@ -155,61 +203,6 @@ def get_adviser_agent(user_profile: dict, user_principles: List[str], book_conte
             user_profile="\n".join([k + ": " + v for (k, v) in user_profile.items()]),
             book_content=book_content,
         ))
+    if is_dynamic_agent:
+        agent.can_handoff_to = can_handoff_to
     return agent
-
-
-async def run_agent(agent: FunctionAgent, question, verbose: bool = False):
-    chat_history = [
-        ChatMessage(
-            role="user", content=question,
-        ),
-    ]
-    handler = agent.run(chat_history=chat_history)
-    if not verbose:
-        output = await handler
-        return output.response.content
-    result = None
-    current_agent = None
-    async for event in handler.stream_events():
-        if (
-                hasattr(event, "current_agent_name")
-                and event.current_agent_name != current_agent
-        ):
-            current_agent = event.current_agent_name
-            print(f"\n{'=' * 50}")
-            print(f"🤖 Agent: {current_agent}")
-            print(f"{'=' * 50}\n")
-        elif isinstance(event, AgentOutput):
-            if event.response.content:
-                print("📤 Output:", event.response.content)
-                result = event.response.content
-            if event.tool_calls:
-                print(
-                    "🛠️  Planning to use tools:",
-                    [call.tool_name for call in event.tool_calls],
-                )
-        elif isinstance(event, ToolCallResult):
-            print(f"🔧 Tool Result ({event.tool_name}):")
-            print(f"  Arguments: {event.tool_kwargs}")
-            print(f"  Output: {event.tool_output}")
-        elif isinstance(event, ToolCall):
-            print(f"🔨 Calling Tool: {event.tool_name}")
-            print(f"  With arguments: {event.tool_kwargs}")
-    return result
-
-
-async def get_advise(session_id: str, question: str, verbose: bool = False):
-    state = get_workflow_state(session_id)
-    principles = state.load_principle_from_cases()
-    profile = state.load_profile()
-    rag_agent = get_principle_rag_agent()
-    book_content = await run_agent(rag_agent, question=question, verbose=verbose)
-    advisor = get_adviser_agent(profile, principles, book_content)
-    advise = await run_agent(advisor, question=question, verbose=verbose)
-    return advise
-
-
-if __name__ == '__main__':
-    Settings.embed_model = get_embedding()
-    Settings.llm = get_openai_llm()
-    asyncio.run(get_advise("xxxx", "How to handle stress?", True, True))

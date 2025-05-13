@@ -1,16 +1,13 @@
-from typing import Optional, List
+from typing import List, Optional
 
 from llama_index.core import Settings
 from llama_index.core.agent import AgentRunner, FunctionCallingAgentWorker
 from llama_index.core.base.llms.types import ChatMessage
-from llama_index.core.llms.function_calling import FunctionCallingLLM
 from llama_index.core.memory import BaseMemory, ChatMemoryBuffer
 from llama_index.core.tools import BaseTool
-from rich import print
+
 
 TOKEN_LIMIT = 40000
-
-
 class MyAgentRunner(AgentRunner):
     PRINT_FORMAT = "[green]{message}[/green]"
 
@@ -37,7 +34,7 @@ class MyAgentRunner(AgentRunner):
         self.session_id = session_id
         super().__init__(worker, memory=memory, verbose=verbose)
 
-    def start_chat(self, msg: str):
+    def start_chat(self, msg: str=None):
         return self._my_chat(msg)
 
     def _my_chat(self, msg: str):

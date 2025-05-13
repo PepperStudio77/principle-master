@@ -4,7 +4,7 @@ from llama_index.core.memory import ChatMemoryBuffer
 from llama_index.core.tools import FunctionTool
 from typing_extensions import override
 
-from core.agent_runners import MyAgentRunner
+from core.common import MyAgentRunner
 from core.state import get_workflow_state, WorkflowState
 
 

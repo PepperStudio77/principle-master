@@ -1,39 +1,38 @@
-import time
-from openai import OpenAI
+from utils.llm import get_openai_llm, get_gemini_llm
+from utils.pdf_file import load_book_summary
 
-from utils.journal_keeper import write_response_to_mark_down, Metric, Response
-from utils.llm import get_config
-from utils.pdf_file import load_principle_book_summary_to_string
+system_prompt_template = """You are an AI assistant that provides thoughtful, practical, and *deeply personalized* suggestions by combining:
+- The user's personal profile and principles
+- Insights retrieved from *Principles* by Ray Dalio
+Book Content: 
+```
+{book_content}
+```
+User profile:
+```
+{user_profile}
+```
+User's question:
+```
+{user_question}
+```
+"""
 
 
-
-def prompt_for_enquiry_with_full_context():
-    system_prompt = ("\n "
-                     "What attached below is the summary of book Principle by Ray Dalio. \n "
-                     "Summary: \n {book_content}"
-                     "You need to provide the answer to question consult to without seeking further clarification.\n"
-                     "You should answer the question solly based on the summary of the book I attached above \n"
-                     "Try to make the response concise and easy to understand.\n")
-
-    book_content = load_principle_book_summary_to_string()
-    prompt = system_prompt.format(book_content=book_content)
-    return prompt
-
-def chat(user_prompt):
-    system_prompt = prompt_for_enquiry_with_full_context()
-    config = get_config()
-    client = OpenAI(api_key=config["api_key"], base_url=config["base_url"])
-    s = time.perf_counter()
-    response = client.chat.completions.create(
-        model=config['model'],
-        messages=[{"role": "system", "content": system_prompt},
-                  {"role": "user", "content": user_prompt}],
-    stream = False,
+def get_system_prompt(book_content: str, user_profile: str, user_question: str):
+    system_prompt = system_prompt_template.format(
+        book_content=book_content,
+        user_profile=user_profile,
+        user_question=user_question
     )
-    e = time.perf_counter()
-    metric = Metric(response.usage.completion_tokens, response.usage.prompt_tokens, response.usage.total_tokens, e - s)
-    write_response_to_mark_down(user_prompt, response, "full-context")
-    return Response(response.choices[0].message.content, metric)
+    return system_prompt
 
 
-
+def chat():
+    llm = get_gemini_llm()
+    user_profile = input(">>Tell me about yourself: ")
+    user_question = input(">>What do you want to ask: ")
+    user_profile = user_profile.strip()
+    book_content = load_book_summary()
+    response = llm.complete(prompt=get_system_prompt(book_content, user_profile, user_question))
+    return response

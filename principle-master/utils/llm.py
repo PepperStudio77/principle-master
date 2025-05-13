@@ -2,7 +2,6 @@ import json
 import os
 
 from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.deepseek import DeepSeek
 from llama_index.llms.gemini import Gemini
 from llama_index.llms.openai import OpenAI
 

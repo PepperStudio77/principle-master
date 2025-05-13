@@ -1,4 +1,4 @@
-from core.agent_runners import MyAgentRunner
+from core.common import MyAgentRunner
 from core.state import AVAILABLE_FUNCTIONS, ROUTING, ENDING, get_workflow_state
 
 
