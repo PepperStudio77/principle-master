@@ -175,7 +175,7 @@ class ProfileManager(object):
         profile_dir = self.local_store_dir()
         profile_file = os.path.join(profile_dir, self.PROFILE_FILE)
         if not os.path.exists(profile_file):
-            raise Exception("Case file do not exist.")
+            return {}
         with open(profile_file, "r+") as f:
             profile = json.load(f)
         return profile
@@ -210,7 +210,7 @@ class CaseManager(object):
         case_dir = self.local_store_dir()
         case_file = os.path.join(case_dir, self.CASE_FILE)
         if not os.path.exists(case_file):
-            raise Exception("Case file do not exist.")
+            return []
         with open(case_file, "r+") as f:
             cases = json.load(f)
         return cases

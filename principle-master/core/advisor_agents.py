@@ -23,11 +23,11 @@ You should not attempt to answer the question but return summarised content as y
 
 
 def get_interviewer_agent(is_dynamic_agent: bool = False, can_handoff_to: List[str] = None):
-    async def clarification(questions: List[str]) -> str:
+    async def clarification(user_original_message, questions_raised: List[str]) -> str:
         # sleep here because I am lazy to implement a io lock, wait for verbose log to finish first.
         await asyncio.sleep(0.5)
         result = ""
-        for q in questions:
+        for q in questions_raised:
             result += q + ":"
             print("Question:" + q)
             response = input("Response:")
@@ -154,8 +154,10 @@ def get_principle_rag_agent(is_dynamic_agent: bool = False, can_handoff_to: List
         tools=tools,
     )
 
-    if is_dynamic_agent:
+    if is_dynamic_agent and can_handoff_to is not None:
         agent.can_handoff_to = can_handoff_to
+        agent.system_prompt = agent.system_prompt + DYNAMIC_AGENT_ADJUSTMENT_PROMPT.format(
+            next_agent_name=can_handoff_to[0])
     return agent
 
 
@@ -208,8 +210,10 @@ def get_adviser_agent(user_profile: dict, user_principles: List[str], book_conte
             user_profile="\n".join([k + ": " + v for (k, v) in user_profile.items()]),
             book_content=book_content,
         ))
-    if is_dynamic_agent:
+    if is_dynamic_agent and can_handoff_to is not None:
         agent.can_handoff_to = can_handoff_to
+        agent.system_prompt = agent.system_prompt + DYNAMIC_AGENT_ADJUSTMENT_PROMPT.format(
+            next_agent_name=can_handoff_to[0])
     return agent
 
 
@@ -234,10 +238,12 @@ Existing Template:
 
 """
     agent = FunctionAgent(
-        name="template_update_agent",
+        name="template_updater",
         description="You are a helpful agent which will update the daily journal template based on the advice provided to the user and user's specific concerns.",
         system_prompt=template_update_prompt.format(existing_template=existing_template),
     )
-    if is_dynamic_agent:
+    if is_dynamic_agent and can_handoff_to is not None:
         agent.can_handoff_to = can_handoff_to
+        agent.system_prompt = agent.system_prompt + DYNAMIC_AGENT_ADJUSTMENT_PROMPT.format(
+            next_agent_name=can_handoff_to[0])
     return agent

@@ -17,9 +17,12 @@ def get_advice_dynamic_workflow(session_id: str, verbose: bool = False):
     principles = state.load_principle_from_cases()
     profile = state.load_profile()
     advisor = get_adviser_agent(user_principles=principles, user_profile=profile, is_dynamic_agent=True,
-                                can_handoff_to=[])
+                                can_handoff_to=["template_updater"])
+    existing_template = state.read_template()
+    template_updater = get_template_update_agent(existing_template, is_dynamic_agent=True)
+
     workflow = AgentWorkflow(
-        agents=[interviewer, advisor, retriever],
+        agents=[interviewer, advisor, retriever, template_updater],
         root_agent="interviewer",
         verbose=verbose,
     )

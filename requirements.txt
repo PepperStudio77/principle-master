@@ -6,5 +6,6 @@ click
 llama_index
 llama-index-llms-deepseek
 llama-index-llms-gemini
+llama-index-embeddings-gemini
 dspy
 rich
