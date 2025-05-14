@@ -1,11 +1,12 @@
-from typing import List
+from typing import List, Optional
 
 from llama_index.core.agent.workflow import AgentWorkflow, AgentOutput, ToolCallResult, ToolCall, FunctionAgent
 from llama_index.core.base.llms.types import ChatMessage
 from llama_index.core.workflow import Workflow, Event, step, Context, StartEvent, StopEvent
 from llama_index.core.workflow.handler import WorkflowHandler
 
-from core.advisor_agents import get_principle_rag_agent, get_interviewer_agent, get_adviser_agent
+from core.advisor_agents import get_principle_rag_agent, get_interviewer_agent, get_adviser_agent, \
+    get_template_update_agent
 from core.state import get_workflow_state
 
 
@@ -29,12 +30,14 @@ def get_static_workflow(session_id: str, verbose: bool = False):
     workflow = AdviceWorkFlow(session_id=session_id, verbose=verbose)
     return workflow
 
-async def _run_agent(agent: FunctionAgent, question, verbose: bool = False):
-    chat_history = [
+
+async def _run_agent(agent: FunctionAgent, question, chat_history: Optional[List[ChatMessage]] = None,
+                     verbose: bool = False):
+    chat_history = [] if chat_history is None else chat_history.copy()
+    chat_history.append(
         ChatMessage(
             role="user", content=question,
-        ),
-    ]
+        ))
     handler = agent.run(chat_history=chat_history)
     if verbose:
         result = await _verbose_print(handler)
@@ -54,9 +57,15 @@ class Advice(Event):
     book_content: str
 
 
+class UpdateJournalTemplate(Event):
+    advice: str
+    question: str
+
+
 class AdviceWorkFlow(Workflow):
 
     def __init__(self, verbose: bool = False, session_id: str = None):
+        self.uuid = session_id
         state = get_workflow_state(session_id)
         self.principles = state.load_principle_from_cases()
         self.profile = state.load_profile()
@@ -69,7 +78,6 @@ class AdviceWorkFlow(Workflow):
         # Step 1: Interviewer agent asks questions to the user
         interviewer = get_interviewer_agent()
         question = await _run_agent(interviewer, question=ev.user_msg, verbose=self.verbose)
-
         return ReferenceRetrivalEvent(question=question)
 
     @step
@@ -81,11 +89,33 @@ class AdviceWorkFlow(Workflow):
                       question=ev.question, book_content=book_content)
 
     @step
-    async def advice(self, ctx: Context, ev: Advice) -> StopEvent:
+    async def advice(self, ctx: Context, ev: Advice) -> UpdateJournalTemplate:
         # Step 3: Adviser agent provides advice based on the user's profile, principles, and book content
         advisor = get_adviser_agent(ev.profile, ev.principles, ev.book_content)
-        advise = await _run_agent(advisor, question=ev.question, verbose=self.verbose)
-        return StopEvent(result=advise)
+        advice = await _run_agent(advisor, question=ev.question, verbose=self.verbose)
+        return UpdateJournalTemplate(advice=advice, question=ev.question)
+
+    @step
+    async def update_journal_template(self, ctx: Context, ev: UpdateJournalTemplate) -> StopEvent:
+        # Step 4: Update the journal template based on the advice provided
+        state = get_workflow_state(self.uuid)
+        existing_template = state.read_template()
+        template_update_agent = get_template_update_agent(existing_template)
+        chat_history = [
+            ChatMessage(
+                role="assistant",
+                content=ev.advice
+            )
+        ]
+        updated_template = await _run_agent(template_update_agent, question=ev.question, chat_history=chat_history,
+                                            verbose=self.verbose)
+        print("Updated template:\n", updated_template.strip("md").strip("```"))
+        print("Do you want to save the updated template? (yes/no)")
+        user_input = input(">>")
+        if user_input == "y" or user_input == "yes" or user_input == "Yes" or user_input == "YES" or user_input == "Y":
+            state.update_template(updated_template)
+            print("Updated template saved.")
+        return StopEvent(result=updated_template)
 
 
 async def _verbose_print(handler: WorkflowHandler) -> str:

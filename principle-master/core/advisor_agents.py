@@ -1,3 +1,4 @@
+import asyncio
 from typing import List
 
 from llama_index.core import VectorStoreIndex, get_response_synthesizer
@@ -22,12 +23,14 @@ You should not attempt to answer the question but return summarised content as y
 
 
 def get_interviewer_agent(is_dynamic_agent: bool = False, can_handoff_to: List[str] = None):
-    def clarification(questions: List[str]) -> str:
+    async def clarification(questions: List[str]) -> str:
+        # sleep here because I am lazy to implement a io lock, wait for verbose log to finish first.
+        await asyncio.sleep(0.5)
         result = ""
         for q in questions:
             result += q + ":"
-            print(q)
-            response = input(">>")
+            print("Question:" + q)
+            response = input("Response:")
             result += response + "\n"
         return result
 
@@ -111,7 +114,7 @@ def get_principle_rag_agent(is_dynamic_agent: bool = False, can_handoff_to: List
     index = load_persisted_index()
     query_engine = _create_query_engine_from_index(index)
 
-    def look_up_principle_book(original_question: str, rewrote_statement: List[str]) -> List[str]:
+    async def look_up_principle_book(original_question: str, rewrote_statement: List[str]) -> List[str]:
         result = []
         for q in rewrote_statement:
             response = query_engine.query(q)
@@ -119,10 +122,12 @@ def get_principle_rag_agent(is_dynamic_agent: bool = False, can_handoff_to: List
             result.extend(content)
         return result
 
-    def clarify_question(original_question: str, your_questions_to_user: List[str]) -> str:
+    async def clarify_question(original_question: str, your_questions_to_user: List[str]) -> str:
         """
         Clarify the user's question if needed. Ask follow-up questions to ensure you understand the user's intent.
         """
+        # sleep here because I am lazy to implement a io lock, wait for verbose log to finish first.
+        await asyncio.sleep(0.5)
         response = ""
         for q in your_questions_to_user:
             print(f"Question: {q}")
@@ -203,6 +208,36 @@ def get_adviser_agent(user_profile: dict, user_principles: List[str], book_conte
             user_profile="\n".join([k + ": " + v for (k, v) in user_profile.items()]),
             book_content=book_content,
         ))
+    if is_dynamic_agent:
+        agent.can_handoff_to = can_handoff_to
+    return agent
+
+
+def get_template_update_agent(existing_template: str, is_dynamic_agent: bool = False, can_handoff_to: List[str] = None):
+    template_update_prompt = """
+You are an AI assistant that updates a daily journal template based on:
+1. Advice provided to the user.
+2. User's specific concerns.
+
+Your task:
+- Insert the Advice to the **Advice for the Day** section.
+- Update the **Daily Goals / Checklist** section to reflect the advice and concerns.
+- Update the **Tomorrow's Focus** section to align with the advice and concerns.
+- Generate the updated markdown as output, just raw markdown content, do not need to quote it with '```'. Do not modify other parts of the template.
+
+Existing Template:
+```
+{existing_template}
+```
+```
+
+
+"""
+    agent = FunctionAgent(
+        name="template_update_agent",
+        description="You are a helpful agent which will update the daily journal template based on the advice provided to the user and user's specific concerns.",
+        system_prompt=template_update_prompt.format(existing_template=existing_template),
+    )
     if is_dynamic_agent:
         agent.can_handoff_to = can_handoff_to
     return agent
