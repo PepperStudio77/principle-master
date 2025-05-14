@@ -2,6 +2,10 @@
 
 ---
 
+##  Advice for the Day
+
+...
+
 ## ✅ Daily Goals / Checklist
 
 - [ ] Priority 1: ___________________________

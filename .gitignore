@@ -5,6 +5,7 @@ principle-master/output
 principle-master/state
 principle-master/notes
 principle-master/index
+principle-master/journal/template.md
 .idea
 
 __pycache__/

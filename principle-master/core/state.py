@@ -117,7 +117,8 @@ class JournalManager(object):
         today = datetime.today().strftime('%Y-%m-%d')
         journal_file = os.path.join(journal_dir, f"journal-{today}.md")
 
-        template_file = os.path.join(journal_dir, self.AI_TEMPLATE)
+        template_file = os.path.join(journal_dir, self.AI_TEMPLATE if os.path.exists(
+            os.path.join(journal_dir, self.AI_TEMPLATE)) else self.BASE_TEMPLATE)
 
         with open(template_file, "r") as template, open(journal_file, "w") as journal:
             journal.write(template.read().format(DATE=today))
@@ -131,7 +132,8 @@ class JournalManager(object):
         :return: The content of the template file.
         """
         journal_dir = self.local_journal_dir()
-        template_file = os.path.join(journal_dir, self.AI_TEMPLATE)
+        template_file = os.path.join(journal_dir, self.AI_TEMPLATE if os.path.exists(
+            os.path.join(journal_dir, self.AI_TEMPLATE)) else self.BASE_TEMPLATE)
 
         with open(template_file, "r") as template:
             return template.read()
