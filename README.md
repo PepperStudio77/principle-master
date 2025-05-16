@@ -4,6 +4,10 @@
 
 `principle-master` is an AI-powered chatbot designed to help users build and refine their own principles to guide their
 work and life. It provides tools for case reflection, principle creation, and content indexing.
+![Overall Function](./principle-master/data/overview.png)
+
+Through a journaling -> reflection -> advice cycle, it aims to establish your operation core which help you establish your own principles. 
+The application is built using Python and [LLamaIndex](https://www.llamaindex.ai/). It supports Gemini or OpenAI LLMs as its backend. 
 
 ---
 
