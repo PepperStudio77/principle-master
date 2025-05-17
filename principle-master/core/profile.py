@@ -2,7 +2,7 @@ from llama_index.core.base.llms.types import ChatMessage
 from llama_index.core.tools import FunctionTool
 
 from core.common import MyAgentRunner
-from core.state import get_workflow_state, WorkflowState
+from core.state import get_workflow_state, Profile
 
 
 class ProfileUpdateAgent(MyAgentRunner):
@@ -64,7 +64,7 @@ class ProfileUpdateAgent(MyAgentRunner):
         state = get_workflow_state(session_id)
 
         def update_profile(content):
-            profile = WorkflowState.Profile()
+            profile = Profile()
             profile.update(self.question_key, content)
             state.persist_profile(profile)
             return "Profile saved"

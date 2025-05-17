@@ -5,7 +5,7 @@ from llama_index.core.memory import BaseMemory
 from llama_index.core.tools import FunctionTool
 
 from core.common import MyAgentRunner
-from core.state import get_workflow_state, WorkflowState
+from core.state import get_workflow_state, ReflectionCase
 
 TOKEN_LIMIT = 40000
 
@@ -22,7 +22,7 @@ class CaseReflectionAgent(MyAgentRunner):
             hashed = hashlib.sha256(case_summary.encode()).hexdigest()
             state = get_workflow_state(session_id)
             state.persist_case(self.session_id,
-                               WorkflowState.ReflectionCase(
+                               ReflectionCase(
                                    case_id=hashed,
                                    summary=case_summary,
                                    detail=case_details,
