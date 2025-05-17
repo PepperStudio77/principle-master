@@ -20,13 +20,14 @@ class MyAgentRunner(AgentRunner):
 
     def __init__(self, session_id: str, tools: List[BaseTool],
                  memory: Optional[BaseMemory] = None,
-                 verbose: bool = False):
+                 verbose: bool = False,
+                 max_function_calls: int = 1) -> None:
         prefix_message = [
             ChatMessage(role="system",
                         content=self.get_purpose()),
         ]
         worker = FunctionCallingAgentWorker(tools=tools, llm=Settings.llm, prefix_messages=prefix_message,
-                                            verbose=verbose)
+                                            verbose=verbose, max_function_calls=max_function_calls)
         if memory is None:
             memory = ChatMemoryBuffer.from_defaults(token_limit=TOKEN_LIMIT)
         memory.put_messages(prefix_message)

@@ -1,8 +1,17 @@
-from llama_index.core.base.llms.types import ChatMessage
 from llama_index.core.tools import FunctionTool
 
 from core.common import MyAgentRunner
 from core.state import get_workflow_state, Profile
+
+
+def get_user_message(question, answer, formating, evaluation: str):
+    return (f"You are helpful assistant to evaluate user's answer to a question whether meet the criteria. \n"
+            f"- Question: {question}\n"
+            f"- Answer: {answer}\n"
+            f"- Formating: {formating}\n"
+            f"- Evaluation: {evaluation}\n"
+            f"** If you find the answer do not met the criteria, you can response to user how can they answer it properly. **\n"
+            f"** If you find the answer met the criteria, you should rewrote it according to formating requirement and update the profile **\n")
 
 
 class ProfileUpdateAgent(MyAgentRunner):
@@ -75,7 +84,7 @@ class ProfileUpdateAgent(MyAgentRunner):
             description="Update the user profile when the answers meet the evaluation criteria. Content parameter is been rewrote to meet the format requirement without losing or adding any information. "
         )
 
-        super().__init__(session_id, [store_profile], verbose=verbose)
+        super().__init__(session_id, [store_profile], verbose=verbose, max_function_calls=1)
 
     def _my_chat(self, msg: str):
         for question in self.questions:
@@ -86,32 +95,15 @@ class ProfileUpdateAgent(MyAgentRunner):
 
     FINISH_RESPONSE = 'AnswerCollected'
 
-    def get_system_prompt(self, question, answer, formating, evaluation: str):
-        return (f"You are helpful assistant to evaluate user's answer to a question whether meet the criteria. \n"
-                f"- Question: {question}\n"
-                f"- Answer: {answer}\n"
-                f"- Formating: {formating}\n"
-                f"- Evaluation: {evaluation}\n"
-                f"** If you find the answer do not met the criteria, you can response to user how can they answer it properly. **\n"
-                f"** If you find the answer met the criteria, you should rewrote it according to formating requirement and update the profile **\n"
-                f"** When you update the profile, your should response '{self.FINISH_RESPONSE}'. Nothing more**")
-
     def address_question(self, question: Question):
         answer = input(">>")
-        system_prompt = self.get_system_prompt(question.question, answer, question.formating, question.evaluation)
-        system_prompt_chat = ChatMessage(
-            role="system",
-            content=system_prompt,
-        )
-        chat_history = [system_prompt_chat]
+        user_msg = get_user_message(question.question, answer, question.formating, question.evaluation)
         while True:
-            response = self.chat("Evaluate it.", chat_history=chat_history)
-            if response.response == self.FINISH_RESPONSE:
-                return "Answer collected", True
-            print(response.response)
-            user_clarification = input(">>")
-            user_chat = ChatMessage(
-                role="user",
-                content=user_clarification,
-            )
-            chat_history.append(user_chat)
+            task = self.create_task(user_msg)
+            response = self.run_step(task.task_id)
+            if len(response.output.sources) > 0:
+                # Have triggered function call
+                return response.output.sources[0].content, True
+            print(response.output.response)
+            user_clarification = input("Clarification:")
+            user_msg += f"\nUser Clarification: {user_clarification}"  # Append user clarification to the chat history

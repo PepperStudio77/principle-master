@@ -39,7 +39,7 @@ class CaseReflectionAgent(MyAgentRunner):
             name="store_reflection_case",
             description="Store reflection case when the information of the cases is sufficiently clarified."
         )
-        super().__init__(session_id, tools=[store_case], memory=memory, verbose=verbose)
+        super().__init__(session_id, tools=[store_case], memory=memory, verbose=verbose, max_function_calls=1)
 
     @staticmethod
     def get_purpose():
@@ -63,7 +63,7 @@ class CaseReflectionAgent(MyAgentRunner):
             "- New Principle\n"
             f"**Once you are confident that the reflection is sufficiently clarified, you will trigger the function call"
             f"store_reflection_case to store the case instead of asking for permission from user **\n"
-            f"** If you are triggering function call to store the case, you should response: '{CaseReflectionAgent.END_OUTPUT}'. Nothing more.**"
+            f"** If you had triggered function call to store the case, you should response: '{CaseReflectionAgent.END_OUTPUT}'. Nothing more.**"
         )
         return p
 
