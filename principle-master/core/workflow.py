@@ -1,4 +1,5 @@
 import asyncio
+import os
 import subprocess
 import uuid
 from typing import Optional
@@ -11,6 +12,7 @@ from rich import print
 
 from core.advice_agent_flow import get_advice_dynamic_workflow, get_static_workflow
 from core.case_reflection import CaseReflectionAgent
+from core.index import get_local_index_store_dir
 from core.intention import IntentionDetectionAgent
 from core.profile import ProfileUpdateAgent
 from core.state import CASE_REFLECTION, ROUTING, ENDING, get_workflow_state, AVAILABLE_FUNCTIONS, \
@@ -94,6 +96,9 @@ class PrincipleMasterFlow(Workflow):
 
     @step
     async def advice(self, ctx: Context, ev: Advice) -> StopEvent:
+        if not os.path.exists(get_local_index_store_dir()):
+            print("Advice function can be used only after you have index some book content. Please use the 'index-content' function first.")
+            return StopEvent(result="Done")
         uer_question = input("How can I help you today?")
         workflow = get_advice_dynamic_workflow(session_id=self.session_id) if self.is_dynamic_advice_flow else \
             get_static_workflow(session_id=self.session_id, verbose=self.verbose)

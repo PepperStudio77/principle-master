@@ -4,7 +4,7 @@ import pymupdf
 from llama_index.core import Document, VectorStoreIndex, StorageContext, load_index_from_storage
 
 
-def _get_local_index_store_dir():
+def get_local_index_store_dir():
     index_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              "./index")
     return index_dir
@@ -19,7 +19,7 @@ def load_pdf_from_path(path: str):
 
 
 def create_and_persist_index_from_path(path: str):
-    local_index_store = _get_local_index_store_dir()
+    local_index_store = get_local_index_store_dir()
     content = load_pdf_from_path(path)
     documents = [Document(text=content)]
     vector_index = VectorStoreIndex.from_documents(documents)
@@ -27,7 +27,7 @@ def create_and_persist_index_from_path(path: str):
     vector_index.storage_context.persist(persist_dir=local_index_store)
 
 def load_persisted_index():
-    local_index_store = _get_local_index_store_dir()
+    local_index_store = get_local_index_store_dir()
     storage_context = StorageContext.from_defaults(persist_dir=local_index_store)
     index = load_index_from_storage(storage_context)
     return index
